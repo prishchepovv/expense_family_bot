@@ -290,3 +290,4 @@ class ExpenseBot:
 if __name__ == '__main__':
     bot = ExpenseBot(BOT_TOKEN)
     bot.run()
+    #nu pizdec ti durak
