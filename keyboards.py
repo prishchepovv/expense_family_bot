@@ -52,8 +52,9 @@ def get_categories_for_filter():
 
 def get_back_keyboard():
     """Клавиатура с кнопкой Назад"""
-    keyboard = [[KeyboardButton("↩️ Назад")]]
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("↩️ Назад")]
+    ], resize_keyboard=True)
 
 def get_settings_keyboard():
     """Клавиатура настроек"""
@@ -62,3 +63,10 @@ def get_settings_keyboard():
         [KeyboardButton("🔔 Уведомления"), KeyboardButton("↩️ Назад")]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
+def get_description_keyboard():
+    """Клавиатура для ввода описания с кнопкой Назад"""
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("Пропустить")],
+        [KeyboardButton("↩️ Назад")]
+    ], resize_keyboard=True)

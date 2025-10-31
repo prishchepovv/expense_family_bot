@@ -126,10 +126,21 @@ class ExpenseBot:
 
     async def get_amount(self, update: Update, context: CallbackContext):
         """Получение суммы расхода"""
+        user_input = update.message.text
+
+        # Обработка кнопки "Назад"
+        if user_input == "↩️ Назад":
+            await update.message.reply_text(
+                "❌ Операция отменена",
+                reply_markup=get_main_keyboard()
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
+        
         try:
-            amount = float(update.message.text.replace(',', '.'))
+            amount = float(user_input.replace(',', '.'))
             if amount <= 0:
-                await update.message.reply_text("❌ Сумма должна быть положительной, тупырка. Попробуй снова:")
+                await update.message.reply_text("❌ Сумма должна быть положительной. Попробуй снова:")
                 return AMOUNT
             
             context.user_data['amount'] = amount
@@ -138,9 +149,9 @@ class ExpenseBot:
                 reply_markup=get_categories_keyboard()
             )
             return CATEGORY
-            
+        
         except ValueError:
-            await update.message.reply_text("❌ Пожалуйста, пораскинь извилинами и введи корректную сумму (например: 150.50):")
+            await update.message.reply_text("❌ Пожалуйста, введи корректную сумму (например: 150.50):")
             return AMOUNT
 
     async def get_category(self, update: Update, context: CallbackContext):
