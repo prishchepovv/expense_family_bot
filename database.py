@@ -199,3 +199,74 @@ class Database:
         total = cursor.fetchone()[0] or 0
         conn.close()
         return total
+
+    # НОВЫЕ МЕТОДЫ ДЛЯ ДЕТАЛИЗАЦИИ
+
+    def get_all_expenses(self, user_id, limit=50):
+        """Получение всех расходов пользователя"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT category, amount, description, date 
+            FROM expenses 
+            WHERE user_id = ? 
+            ORDER BY date DESC 
+            LIMIT ?
+        ''', (user_id, limit))
+        
+        expenses = cursor.fetchall()
+        conn.close()
+        return expenses
+
+    def get_expenses_by_date_range(self, user_id, start_date, end_date):
+        """Получение расходов за период"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT category, amount, description, date 
+            FROM expenses 
+            WHERE user_id = ? AND date(date) BETWEEN ? AND ?
+            ORDER BY date DESC
+        ''', (user_id, start_date, end_date))
+        
+        expenses = cursor.fetchall()
+        conn.close()
+        return expenses
+
+    def get_expenses_by_category(self, user_id, category):
+        """Получение расходов по категории"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        # Убираем эмодзи для поиска
+        clean_category = ' '.join(category.split()[1:]) if ' ' in category else category
+        
+        cursor.execute('''
+            SELECT category, amount, description, date 
+            FROM expenses 
+            WHERE user_id = ? AND category = ?
+            ORDER BY date DESC
+        ''', (user_id, clean_category))
+        
+        expenses = cursor.fetchall()
+        conn.close()
+        return expenses
+
+    def get_largest_expenses(self, user_id, limit=10):
+        """Получение самых крупных расходов"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT category, amount, description, date 
+            FROM expenses 
+            WHERE user_id = ? 
+            ORDER BY amount DESC 
+            LIMIT ?
+        ''', (user_id, limit))
+        
+        expenses = cursor.fetchall()
+        conn.close()
+        return expenses

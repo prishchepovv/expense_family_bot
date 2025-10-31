@@ -8,9 +8,11 @@ from database import Database
 from keyboards import (
     get_main_keyboard, get_categories_keyboard, 
     get_statistics_keyboard, get_back_keyboard,
-    get_settings_keyboard
+    get_settings_keyboard, get_detailed_stats_keyboard,  # Добавлено
+    get_categories_for_filter  # Добавлено
 )
 from config import BOT_TOKEN
+from datetime import datetime  # Добавлено
 
 # Настройка логирования
 logging.basicConfig(
@@ -21,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 # Состояния для ConversationHandler
 AMOUNT, CATEGORY, DESCRIPTION = range(3)
+# Добавим новые состояния для детализации
+DETAILED_STATS, DATE_RANGE, CATEGORY_FILTER = range(3, 6)
 
 class ExpenseBot:
     def __init__(self, token):
@@ -50,16 +54,44 @@ class ExpenseBot:
         # Обработчики сообщений
         self.application.add_handler(MessageHandler(filters.Regex("^📊 Статистика$"), self.show_statistics_menu))
         self.application.add_handler(MessageHandler(filters.Regex("^📅 Сегодня$"), self.show_today_stats))
-        self.application.add_handler(MessageHandler(filters.Regex("^📆 Неделя$"), self.show_week_stats))  # Добавлено
-        self.application.add_handler(MessageHandler(filters.Regex("^📈 Месяц$"), self.show_month_stats))  # Изменено
+        self.application.add_handler(MessageHandler(filters.Regex("^📆 Неделя$"), self.show_week_stats))
+        self.application.add_handler(MessageHandler(filters.Regex("^📈 Месяц$"), self.show_month_stats))
         self.application.add_handler(MessageHandler(filters.Regex("^⚙️ Настройки$"), self.show_settings))
         self.application.add_handler(MessageHandler(filters.Regex("^ℹ️ Помощь$"), self.help_command))
         self.application.add_handler(MessageHandler(filters.Regex("^↩️ Назад$"), self.back_to_main))
         
         # Обработчик статистики из меню статистики
         self.application.add_handler(MessageHandler(filters.Regex("^📊 Сегодня$"), self.show_today_detailed))
-        self.application.add_handler(MessageHandler(filters.Regex("^📅 Неделя$"), self.show_week_detailed))  # Добавлено
+        self.application.add_handler(MessageHandler(filters.Regex("^📅 Неделя$"), self.show_week_detailed))
         self.application.add_handler(MessageHandler(filters.Regex("^📈 Месяц$"), self.show_month_detailed))
+        
+        # Добавляем обработчики для детализации
+        self.application.add_handler(MessageHandler(filters.Regex("^📋 Детализация$"), self.show_detailed_stats_menu))
+        self.application.add_handler(MessageHandler(filters.Regex("^📋 Все расходы$"), self.show_all_expenses))
+        self.application.add_handler(MessageHandler(filters.Regex("^📅 По дате$"), self.ask_date_range))
+        self.application.add_handler(MessageHandler(filters.Regex("^📁 По категории$"), self.ask_category_filter))
+        self.application.add_handler(MessageHandler(filters.Regex("^💰 Самые крупные$"), self.show_largest_expenses))
+        self.application.add_handler(MessageHandler(filters.Regex("^↩️ Назад в статистику$"), self.back_to_statistics))
+        
+        # ConversationHandler для фильтрации по дате
+        date_conv_handler = ConversationHandler(
+            entry_points=[MessageHandler(filters.Regex("^📅 По дате$"), self.ask_date_range)],
+            states={
+                DATE_RANGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.process_date_range)],
+            },
+            fallbacks=[MessageHandler(filters.Regex("^↩️ Назад$"), self.cancel_detailed_stats)],
+        )
+        self.application.add_handler(date_conv_handler)
+        
+        # ConversationHandler для фильтрации по категории
+        category_conv_handler = ConversationHandler(
+            entry_points=[MessageHandler(filters.Regex("^📁 По категории$"), self.ask_category_filter)],
+            states={
+                CATEGORY_FILTER: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.process_category_filter)],
+            },
+            fallbacks=[MessageHandler(filters.Regex("^↩️ Назад$"), self.cancel_detailed_stats)],
+        )
+        self.application.add_handler(category_conv_handler)
 
     async def start(self, update: Update, context: CallbackContext):
         """Обработчик команды /start"""
@@ -268,6 +300,242 @@ class ExpenseBot:
         """Детальная статистика за месяц"""
         await self.show_month_stats(update, context)
 
+    # НОВЫЕ МЕТОДЫ ДЛЯ ДЕТАЛИЗАЦИИ
+
+    async def show_detailed_stats_menu(self, update: Update, context: CallbackContext):
+        """Показ меню детализированной статистики"""
+        await update.message.reply_text(
+            "📋 **Детализированная статистика**\n\n"
+            "Выберите тип отчета:",
+            reply_markup=get_detailed_stats_keyboard(),
+            parse_mode='Markdown'
+        )
+
+    async def show_all_expenses(self, update: Update, context: CallbackContext):
+        """Показ всех расходов"""
+        user_id = update.effective_user.id
+        expenses = self.db.get_all_expenses(user_id)
+        
+        if not expenses:
+            await update.message.reply_text(
+                "📝 У вас пока нет записей о расходах",
+                reply_markup=get_detailed_stats_keyboard()
+            )
+            return
+        
+        message = "📋 **Все расходы**\n\n"
+        total = 0
+        
+        for i, (category, amount, description, date) in enumerate(expenses, 1):
+            total += amount
+            #Исправляем парсинг даты с микросекундами
+            try:
+                # Пробуем разные форматы даты
+                if '.' in date:
+                    # Формат с микросекундами: 2024-01-01 12:00:00.123456
+                    date_str = datetime.strptime(date, '%Y-%m-%d %H:%M:%S.%f').strftime('%d.%m.%Y')
+                else:
+                    # Формат без микросекунд: 2024-01-01 12:00:00
+                    date_str = datetime.strptime(date, '%Y-%m-%d %H:%M:%S').strftime('%d.%m.%Y')
+            except ValueError:
+                # Если не получается распарсить, используем исходную дату
+                date_str = date.split()[0]  # Берем только дату без времени
+
+            desc = description if description else "без описания"
+            message += f"{i}. **{category}** - {amount:.2f} руб.\n"
+            message += f"   📅 {date_str} | 📝 {desc}\n\n"
+
+        message += f"💵 **Итого:** {total:.2f} руб.\n"
+        message += f"📊 **Всего записей:** {len(expenses)}"
+
+        # Разбиваем сообщение если оно слишком длинное
+        if len(message) > 4000:
+            parts = [message[i:i+4000] for i in range(0, len(message), 4000)]
+            for part in parts:
+                await update.message.reply_text(part, parse_mode='Markdown')
+        else:
+            await update.message.reply_text(
+                message,
+                reply_markup=get_detailed_stats_keyboard(),
+                parse_mode='Markdown'
+            )
+
+    async def ask_date_range(self, update: Update, context: CallbackContext):
+        """Запрос периода дат"""
+        await update.message.reply_text(
+            "📅 **Введите период в формате:**\n"
+            "**ДД.ММ.ГГГГ-ДД.ММ.ГГГГ**\n\n"
+            "Например: 01.12.2024-15.12.2024\n"
+            "Или введите 'месяц' для текущего месяца",
+            reply_markup=get_back_keyboard()
+        )
+        return DATE_RANGE
+
+    async def process_date_range(self, update: Update, context: CallbackContext):
+        """Обработка введенного периода"""
+        user_input = update.message.text.strip()
+        user_id = update.effective_user.id
+        
+        if user_input.lower() == 'месяц':
+            # Текущий месяц
+            today = datetime.now()
+            start_date = today.replace(day=1).strftime('%Y-%m-%d')
+            end_date = today.strftime('%Y-%m-%d')
+            period_text = f"за {today.strftime('%B %Y')}"
+        else:
+            try:
+                # Парсим ввод пользователя
+                start_str, end_str = user_input.split('-')
+                start_date = datetime.strptime(start_str.strip(), '%d.%m.%Y').strftime('%Y-%m-%d')
+                end_date = datetime.strptime(end_str.strip(), '%d.%m.%Y').strftime('%Y-%m-%d')
+                period_text = f"с {start_str} по {end_str}"
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ Неверный формат даты. Используйте ДД.ММ.ГГГГ-ДД.ММ.ГГГГ\n"
+                    "Попробуйте снова:",
+                    reply_markup=get_back_keyboard()
+                )
+                return DATE_RANGE
+        
+        expenses = self.db.get_expenses_by_date_range(user_id, start_date, end_date)
+        
+        if not expenses:
+            await update.message.reply_text(
+                f"📝 Расходов {period_text} не найдено",
+                reply_markup=get_detailed_stats_keyboard()
+            )
+            return
+        
+        message = f"📅 **Расходы {period_text}**\n\n"
+        total = 0
+        
+        for i, (category, amount, description, date) in enumerate(expenses, 1):
+            total += amount
+            date_str = datetime.strptime(date, '%Y-%m-%d %H:%M:%S').strftime('%d.%m.%Y')
+            desc = description if description else "без описания"
+            message += f"{i}. **{category}** - {amount:.2f} руб.\n"
+            message += f"   📅 {date_str} | 📝 {desc}\n\n"
+        
+        message += f"💵 **Итого:** {total:.2f} руб.\n"
+        message += f"📊 **Всего записей:** {len(expenses)}"
+        
+        await update.message.reply_text(
+            message,
+            reply_markup=get_detailed_stats_keyboard(),
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+
+    async def ask_category_filter(self, update: Update, context: CallbackContext):
+        """Запрос категории для фильтрации"""
+        await update.message.reply_text(
+            "📁 **Выберите категорию для фильтрации:**",
+            reply_markup=get_categories_for_filter()
+        )
+        return CATEGORY_FILTER
+
+    async def process_category_filter(self, update: Update, context: CallbackContext):
+        """Обработка выбранной категории"""
+        category_input = update.message.text
+        user_id = update.effective_user.id
+        
+        if category_input == "↩️ Назад":
+            await update.message.reply_text(
+                "📋 Выберите тип отчета:",
+                reply_markup=get_detailed_stats_keyboard()
+            )
+            return ConversationHandler.END
+        
+        if category_input == "📋 Все категории":
+            await self.show_all_expenses(update, context)
+            return ConversationHandler.END
+        
+        # Убираем эмодзи для поиска в базе
+        clean_category = ' '.join(category_input.split()[1:]) if ' ' in category_input else category_input
+        
+        expenses = self.db.get_expenses_by_category(user_id, clean_category)
+        
+        if not expenses:
+            await update.message.reply_text(
+                f"📝 Расходов по категории '{category_input}' не найдено",
+                reply_markup=get_detailed_stats_keyboard()
+            )
+            return
+        
+        message = f"📁 **Расходы по категории: {category_input}**\n\n"
+        total = 0
+        
+        for i, (category, amount, description, date) in enumerate(expenses, 1):
+            total += amount
+            date_str = datetime.strptime(date, '%Y-%m-%d %H:%M:%S').strftime('%d.%m.%Y')
+            desc = description if description else "без описания"
+            message += f"{i}. {amount:.2f} руб. | 📅 {date_str}\n"
+            message += f"   📝 {desc}\n\n"
+        
+        message += f"💵 **Итого по категории:** {total:.2f} руб.\n"
+        message += f"📊 **Всего записей:** {len(expenses)}"
+        
+        await update.message.reply_text(
+            message,
+            reply_markup=get_detailed_stats_keyboard(),
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
+
+    async def show_largest_expenses(self, update: Update, context: CallbackContext):
+        """Показ самых крупных расходов"""
+        user_id = update.effective_user.id
+        expenses = self.db.get_largest_expenses(user_id)
+        
+        if not expenses:
+            await update.message.reply_text(
+                "📝 У вас пока нет записей о расходах",
+                reply_markup=get_detailed_stats_keyboard()
+            )
+            return
+        
+        message = "💰 **Самые крупные расходы**\n\n"
+        total = 0
+        
+        for i, (category, amount, description, date) in enumerate(expenses, 1):
+            total += amount
+
+            # Исправленный парсинг даты с микросекундами
+            try:
+                if '.' in date:
+                    date_str = datetime.strptime(date, '%Y-%m-%d %H:%M:%S.%f').strftime('%d.%m.%Y')
+                else:
+                    date_str = datetime.strptime(date, '%Y-%m-%d %H:%M:%S').strftime('%d.%m.%Y')
+            except ValueError:
+                date_str = date.split()[0]  # Берем только дату без времени
+
+            desc = description if description else "без описания"
+            message += f"{i}. **{category}** - {amount:.2f} руб.\n"
+            message += f"   📅 {date_str} | 📝 {desc}\n\n"
+
+        message += f"💵 **Сумма топ-{len(expenses)} расходов:** {total:.2f} руб."
+
+        await update.message.reply_text(
+            message,
+            reply_markup=get_detailed_stats_keyboard(),
+            parse_mode='Markdown'
+        )
+
+    async def back_to_statistics(self, update: Update, context: CallbackContext):
+        """Возврат в меню статистики"""
+        await update.message.reply_text(
+            "📊 Выбери тип статистики:",
+            reply_markup=get_statistics_keyboard()
+        )
+
+    async def cancel_detailed_stats(self, update: Update, context: CallbackContext):
+        """Отмена детализированной статистики"""
+        await update.message.reply_text(
+            "📋 Выберите тип отчета:",
+            reply_markup=get_detailed_stats_keyboard()
+        )
+        return ConversationHandler.END
+
     async def show_settings(self, update: Update, context: CallbackContext):
         """Показ настроек"""
         await update.message.reply_text(
@@ -287,6 +555,7 @@ class ExpenseBot:
 • 📅 Сегодня - расходы за сегодня
 • 📆 Неделя - расходы за текущую неделю
 • 📈 Месяц - расходы за текущий месяц
+• 📋 Детализация - подробные отчеты по расходам
 
 **Как пользоваться:**
 1. Нажми «💸 Добавить расход»
