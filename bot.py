@@ -50,13 +50,15 @@ class ExpenseBot:
         # Обработчики сообщений
         self.application.add_handler(MessageHandler(filters.Regex("^📊 Статистика$"), self.show_statistics_menu))
         self.application.add_handler(MessageHandler(filters.Regex("^📅 Сегодня$"), self.show_today_stats))
-        self.application.add_handler(MessageHandler(filters.Regex("^📆 Месяц$"), self.show_month_stats))
+        self.application.add_handler(MessageHandler(filters.Regex("^📆 Неделя$"), self.show_week_stats))  # Добавлено
+        self.application.add_handler(MessageHandler(filters.Regex("^📈 Месяц$"), self.show_month_stats))  # Изменено
         self.application.add_handler(MessageHandler(filters.Regex("^⚙️ Настройки$"), self.show_settings))
         self.application.add_handler(MessageHandler(filters.Regex("^ℹ️ Помощь$"), self.help_command))
         self.application.add_handler(MessageHandler(filters.Regex("^↩️ Назад$"), self.back_to_main))
         
-        # Обработчик статистики
+        # Обработчик статистики из меню статистики
         self.application.add_handler(MessageHandler(filters.Regex("^📊 Сегодня$"), self.show_today_detailed))
+        self.application.add_handler(MessageHandler(filters.Regex("^📅 Неделя$"), self.show_week_detailed))  # Добавлено
         self.application.add_handler(MessageHandler(filters.Regex("^📈 Месяц$"), self.show_month_detailed))
 
     async def start(self, update: Update, context: CallbackContext):
@@ -71,7 +73,7 @@ class ExpenseBot:
 
 📊 **Возможности:**
 • 💸 Быстрое добавление расходов
-• 📊 Статистика за день и месяц
+• 📊 Статистика за день, неделю и месяц
 • 📈 Детализация по категориям
 • 👥 Учет для двух пользователей
 
@@ -208,6 +210,29 @@ class ExpenseBot:
             parse_mode='Markdown'
         )
 
+    async def show_week_stats(self, update: Update, context: CallbackContext):
+        """Показ статистики за неделю"""
+        user_id = update.effective_user.id
+        total = self.db.get_total_week(user_id)
+        expenses = self.db.get_week_expenses(user_id)
+        
+        message = f"📅 **Расходы за текущую неделю**\n\n"
+        message += f"💵 **Общая сумма:** {total:.2f} руб.\n\n"
+        
+        if expenses:
+            message += "**По категориям:**\n"
+            for category, amount in expenses:
+                percentage = (amount / total) * 100 if total > 0 else 0
+                message += f"• {category}: {amount:.2f} руб. ({percentage:.1f}%)\n"
+        else:
+            message += "📝 Расходов за неделю нет"
+        
+        await update.message.reply_text(
+            message,
+            reply_markup=get_main_keyboard(),
+            parse_mode='Markdown'
+        )
+
     async def show_month_stats(self, update: Update, context: CallbackContext):
         """Показ статистики за месяц"""
         user_id = update.effective_user.id
@@ -235,6 +260,10 @@ class ExpenseBot:
         """Детальная статистика за сегодня"""
         await self.show_today_stats(update, context)
 
+    async def show_week_detailed(self, update: Update, context: CallbackContext):
+        """Детальная статистика за неделю"""
+        await self.show_week_stats(update, context)
+
     async def show_month_detailed(self, update: Update, context: CallbackContext):
         """Детальная статистика за месяц"""
         await self.show_month_stats(update, context)
@@ -256,7 +285,8 @@ class ExpenseBot:
 • 💸 Добавить расход - быстрая запись расхода
 • 📊 Статистика - обзор расходов
 • 📅 Сегодня - расходы за сегодня
-• 📆 Месяц - расходы за текущий месяц
+• 📆 Неделя - расходы за текущую неделю
+• 📈 Месяц - расходы за текущий месяц
 
 **Как пользоваться:**
 1. Нажми «💸 Добавить расход»

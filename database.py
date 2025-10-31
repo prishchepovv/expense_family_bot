@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import logging
 
 logger = logging.getLogger(__name__)
@@ -123,6 +123,22 @@ class Database:
         conn.close()
         return expenses
 
+    def get_week_expenses(self, user_id):
+        """Получение расходов за текущую неделю"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT category, SUM(amount) 
+            FROM expenses 
+            WHERE user_id = ? AND date(date) >= date('now', 'weekday 0', '-7 days')
+            GROUP BY category
+        ''', (user_id,))
+        
+        expenses = cursor.fetchall()
+        conn.close()
+        return expenses
+
     def get_month_expenses(self, user_id):
         """Получение расходов за текущий месяц"""
         conn = sqlite3.connect(self.db_name)
@@ -148,6 +164,21 @@ class Database:
             SELECT SUM(amount) 
             FROM expenses 
             WHERE user_id = ? AND date(date) = date('now')
+        ''', (user_id,))
+        
+        total = cursor.fetchone()[0] or 0
+        conn.close()
+        return total
+
+    def get_total_week(self, user_id):
+        """Общая сумма расходов за неделю"""
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT SUM(amount) 
+            FROM expenses 
+            WHERE user_id = ? AND date(date) >= date('now', 'weekday 0', '-7 days')
         ''', (user_id,))
         
         total = cursor.fetchone()[0] or 0
