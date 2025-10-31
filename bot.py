@@ -32,6 +32,16 @@ class ExpenseBot:
         self.db = Database()
         self.setup_handlers()
 
+    def _format_date(self, date_string):
+        """Вспомогательный метод для форматирования даты из базы данных"""
+        try:
+            if '.' in date_string:
+                return datetime.strptime(date_string, '%Y-%m-%d %H:%M:%S.%f').strftime('%d.%m.%Y')
+            else:
+                return datetime.strptime(date_string, '%Y-%m-%d %H:%M:%S').strftime('%d.%m.%Y')
+        except ValueError:
+            return date_string.split()[0]       
+
     def setup_handlers(self):
         """Настройка обработчиков команд"""
         
@@ -68,30 +78,18 @@ class ExpenseBot:
         # Добавляем обработчики для детализации
         self.application.add_handler(MessageHandler(filters.Regex("^📋 Детализация$"), self.show_detailed_stats_menu))
         self.application.add_handler(MessageHandler(filters.Regex("^📋 Все расходы$"), self.show_all_expenses))
-        self.application.add_handler(MessageHandler(filters.Regex("^📅 По дате$"), self.ask_date_range))
-        self.application.add_handler(MessageHandler(filters.Regex("^📁 По категории$"), self.ask_category_filter))
         self.application.add_handler(MessageHandler(filters.Regex("^💰 Самые крупные$"), self.show_largest_expenses))
         self.application.add_handler(MessageHandler(filters.Regex("^↩️ Назад в статистику$"), self.back_to_statistics))
-        
-        # ConversationHandler для фильтрации по дате
-        date_conv_handler = ConversationHandler(
-            entry_points=[MessageHandler(filters.Regex("^📅 По дате$"), self.ask_date_range)],
-            states={
-                DATE_RANGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.process_date_range)],
-            },
-            fallbacks=[MessageHandler(filters.Regex("^↩️ Назад$"), self.cancel_detailed_stats)],
-        )
-        self.application.add_handler(date_conv_handler)
-        
-        # ConversationHandler для фильтрации по категории
-        category_conv_handler = ConversationHandler(
-            entry_points=[MessageHandler(filters.Regex("^📁 По категории$"), self.ask_category_filter)],
-            states={
-                CATEGORY_FILTER: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.process_category_filter)],
-            },
-            fallbacks=[MessageHandler(filters.Regex("^↩️ Назад$"), self.cancel_detailed_stats)],
-        )
-        self.application.add_handler(category_conv_handler)
+
+        # Убираем ConversationHandler и добавляем простые обработчики для даты и категории
+        self.application.add_handler(MessageHandler(filters.Regex("^📅 По дате$"), self.ask_date_range))
+        self.application.add_handler(MessageHandler(filters.Regex("^📁 По категории$"), self.ask_category_filter))
+
+        # Обработчики для ответов на запросы даты и категории
+        self.application.add_handler(MessageHandler(
+            filters.TEXT & ~filters.COMMAND & ~filters.Regex("^↩️ Назад$"),
+            self.handle_detailed_input
+        ))
 
     async def start(self, update: Update, context: CallbackContext):
         """Обработчик команды /start"""
@@ -369,7 +367,6 @@ class ExpenseBot:
             "Или введите 'месяц' для текущего месяца",
             reply_markup=get_back_keyboard()
         )
-        return DATE_RANGE
 
     async def process_date_range(self, update: Update, context: CallbackContext):
         """Обработка введенного периода"""
@@ -395,7 +392,7 @@ class ExpenseBot:
                     "Попробуйте снова:",
                     reply_markup=get_back_keyboard()
                 )
-                return DATE_RANGE
+                return
         
         expenses = self.db.get_expenses_by_date_range(user_id, start_date, end_date)
         
@@ -411,7 +408,7 @@ class ExpenseBot:
         
         for i, (category, amount, description, date) in enumerate(expenses, 1):
             total += amount
-            date_str = datetime.strptime(date, '%Y-%m-%d %H:%M:%S').strftime('%d.%m.%Y')
+            date_str = self._format_date(date)
             desc = description if description else "без описания"
             message += f"{i}. **{category}** - {amount:.2f} руб.\n"
             message += f"   📅 {date_str} | 📝 {desc}\n\n"
@@ -424,7 +421,6 @@ class ExpenseBot:
             reply_markup=get_detailed_stats_keyboard(),
             parse_mode='Markdown'
         )
-        return ConversationHandler.END
 
     async def ask_category_filter(self, update: Update, context: CallbackContext):
         """Запрос категории для фильтрации"""
@@ -432,7 +428,6 @@ class ExpenseBot:
             "📁 **Выберите категорию для фильтрации:**",
             reply_markup=get_categories_for_filter()
         )
-        return CATEGORY_FILTER
 
     async def process_category_filter(self, update: Update, context: CallbackContext):
         """Обработка выбранной категории"""
@@ -444,11 +439,11 @@ class ExpenseBot:
                 "📋 Выберите тип отчета:",
                 reply_markup=get_detailed_stats_keyboard()
             )
-            return ConversationHandler.END
+            return
         
         if category_input == "📋 Все категории":
             await self.show_all_expenses(update, context)
-            return ConversationHandler.END
+            return
         
         # Убираем эмодзи для поиска в базе
         clean_category = ' '.join(category_input.split()[1:]) if ' ' in category_input else category_input
@@ -467,7 +462,7 @@ class ExpenseBot:
         
         for i, (category, amount, description, date) in enumerate(expenses, 1):
             total += amount
-            date_str = datetime.strptime(date, '%Y-%m-%d %H:%M:%S').strftime('%d.%m.%Y')
+            date_str = self._format_date(date)
             desc = description if description else "без описания"
             message += f"{i}. {amount:.2f} руб. | 📅 {date_str}\n"
             message += f"   📝 {desc}\n\n"
@@ -480,7 +475,6 @@ class ExpenseBot:
             reply_markup=get_detailed_stats_keyboard(),
             parse_mode='Markdown'
         )
-        return ConversationHandler.END
 
     async def show_largest_expenses(self, update: Update, context: CallbackContext):
         """Показ самых крупных расходов"""
@@ -528,14 +522,6 @@ class ExpenseBot:
             reply_markup=get_statistics_keyboard()
         )
 
-    async def cancel_detailed_stats(self, update: Update, context: CallbackContext):
-        """Отмена детализированной статистики"""
-        await update.message.reply_text(
-            "📋 Выберите тип отчета:",
-            reply_markup=get_detailed_stats_keyboard()
-        )
-        return ConversationHandler.END
-
     async def show_settings(self, update: Update, context: CallbackContext):
         """Показ настроек"""
         await update.message.reply_text(
@@ -543,6 +529,60 @@ class ExpenseBot:
             reply_markup=get_settings_keyboard(),
             parse_mode='Markdown'
         )
+
+    async def handle_detailed_input(self, update: Update, context: CallbackContext):
+        """Обработка ввода для детализированной статистики"""
+        user_input = update.message.text.strip()
+
+        # Проверяем, является ли ввод периодом дат (формат ДД.ММ.ГГГГ-ДД.ММ.ГГГГ)
+        if self._is_date_period(user_input):
+            await self.process_date_range(update, context)
+        # Проверяем, является ли ввод категорией (содержит эмодзи)
+        elif any(char in user_input for char in ['🍔', '⛽️', '🏠', '👗', '💊', '🍺', '📱', '💡', '🎁', '💸', '🚬', '🐈']):
+            await self.process_category_filter(update, context)
+        else:
+            await update.message.reply_text(
+                "❌ Не понимаю ваш запрос. Используйте кнопки меню.",
+                reply_markup=get_detailed_stats_keyboard()
+            )
+    
+    def _is_date_period(self, text):
+        """Проверяет, является ли текст периодом дат"""
+        text = text.strip().lower()
+
+        # Проверяем ключевое слово "месяц"
+        if text == 'месяц':
+            return True
+        
+        # Проверяем формат ДД.ММ.ГГГГ-ДД.ММ.ГГГГ
+        if '-' in text:
+            parts = text.split('-')
+            if len(parts) == 2:
+                start, end = parts
+                # Проверяем, что обе части похожи на даты
+                if self._is_date_like(start) and self._is_date_like(end):
+                    return True      
+        return False
+    
+    def _is_date_like(self, text):
+        """Проверяет, похож ли текст на дату в формате ДД.ММ.ГГГГ"""
+        text = text.strip()
+
+        # Проверяем длину и наличие точек
+        if len(text) == 10 and text.count('.') == 2:
+            parts = text.split('.')
+            if len(parts) == 3:
+                day, month, year = parts
+                # Проверяем, что все части - числа
+                if day.isdigit() and month.isdigit() and year.isdigit():
+                    # Проверяем разумные диапазоны
+                    day_int = int(day)
+                    month_int = int(month)
+                    year_int = int(year)
+                    if (1 <= day_int <= 31 and 1 <= month_int <= 12 and
+                        2000 <= year_int <= 2100):
+                        return True
+        return False
 
     async def help_command(self, update: Update, context: CallbackContext):
         """Показ помощи"""
